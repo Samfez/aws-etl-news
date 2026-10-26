@@ -1,0 +1,23 @@
+[project]
+name = "aws-etl-news"
+version = "0.1.0"
+description = "ETL pipeline for ingesting Hacker News data into a cloud data lake."
+readme = "README.md"
+authors = [
+    { name = "Samfez"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=25.0.1",
+    "requests>=2.34.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
