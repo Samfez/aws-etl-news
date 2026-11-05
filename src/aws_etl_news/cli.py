@@ -2,25 +2,26 @@
 """ETL orchestration: fetch, parse and write Hacker News stories to Parquet."""
 
 
+
+import io
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
 
+import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from aws_etl_news.client import fetch_item, fetch_top_story_ids
 from aws_etl_news.parse import parse_story
 
-logger = logging.getLogger(__name__)  # module-level logger
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-
+logger = logging.getLogger(__name__)
+BUCKET = "hn-raw"
+REGION = "eu-central-1"
 
 def main():
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"topstories_{ts}.parquet"
+    key = f"topstories_{ts}.parquet"
 
     # Step 1: Fetch front-page IDs; if the API fails, abort here
     list_top_story_ids = fetch_top_story_ids(50)
@@ -62,11 +63,11 @@ def main():
 
     logger.info("Data processed successfully.")
 
-    save_to_parquet(cleaned_data, filename)
+    s3_client = boto3.client("s3", region_name=REGION)
+    save_to_parquet(cleaned_data, s3_client, BUCKET, key)
 
 
-# Write cleaned_data to a Parquet file in the 'data' folder (repo root) using pyarrow
-def save_to_parquet(data, filename):
+def save_to_parquet(data, s3_client, bucket, key):
 
     # Story schema (matches parse_story)
     schema = pa.schema([
@@ -82,10 +83,11 @@ def save_to_parquet(data, filename):
 
     table = pa.Table.from_pylist(data, schema=schema)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    file_path = DATA_DIR / filename
-    pq.write_table(table, str(file_path))
-    logger.info(f"File saved successfully at: {file_path}")
+    buffer = io.BytesIO()
+    pq.write_table(table, buffer)
+    buffer.seek(0)
+    s3_client.put_object(Bucket=bucket, Key=key, Body=buffer)
+    logger.info(f"File uploaded successfully to: s3://{bucket}/{key}")
 
 
 if __name__ == "__main__":
