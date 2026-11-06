@@ -1,12 +1,12 @@
 # aws-etl-news
 
-ETL pipeline that ingests Hacker News front-page stories and writes them to Parquet. The extract and parse steps run locally today; the output is shaped for later landing in a cloud data lake.
+ETL pipeline that ingests Hacker News front-page stories and writes them as Parquet files to an S3 bucket on AWS.
 
 ## What it does
 
 1. **Extract** — fetch the current top-story IDs, then each item, from the [Hacker News Firebase API](https://github.com/HackerNews/API).
 2. **Transform** — keep only `type == "story"` records and flatten them to eight fields. Missing optional fields (for example `url` on Ask HN posts) stay `null`.
-3. **Load** — write a timestamped Parquet file under `data/` (gitignored).
+3. **Load** — write the stories as Parquet to an in-memory buffer and upload it to S3 under a timestamped key.
 
 Each run fetches up to 50 front-page items. A failed ID list or an empty parse result aborts the job; a single item that fails to fetch or parse is skipped with a warning.
 
@@ -14,6 +14,8 @@ Each run fetches up to 50 front-page items. A failed ID list or an empty parse r
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
+- [Terraform](https://developer.hashicorp.com/terraform) and the [AWS CLI](https://aws.amazon.com/cli/), to provision the bucket and run against AWS
+- An AWS CLI profile with permission to write to the bucket
 
 ## Setup
 
@@ -21,22 +23,33 @@ Each run fetches up to 50 front-page items. A failed ID list or an empty parse r
 uv sync --group dev
 ```
 
+## Provision the bucket
+
+The bucket is defined in `infra/main.tf`. Before applying, set your bucket name and AWS CLI profile there, and use the same bucket name for `BUCKET` in `src/aws_etl_news/cli.py`. S3 bucket names are globally unique, so pick your own.
+
+```bash
+aws sso login --profile <your-profile>
+cd infra
+terraform init
+terraform apply
+```
+
 ## Run the pipeline
 
 ```bash
-uv run python -m aws_etl_news.cli
+AWS_PROFILE=<your-profile> uv run python -m aws_etl_news.cli
 ```
 
 Output lands at:
 
 ```text
-data/topstories_<UTC timestamp>.parquet
+s3://<your-bucket>/topstories_<UTC timestamp>.parquet
 ```
 
-Inspect a file from the terminal:
+List the uploaded files:
 
 ```bash
-uv run python -c "import pyarrow.parquet as pq; t = pq.read_table('data/topstories_YYYYMMDDTHHMMSSZ.parquet'); print(t.schema); print(t.to_pandas())"
+aws s3 ls s3://<your-bucket>/ --profile <your-profile>
 ```
 
 ## Story schema
@@ -57,13 +70,15 @@ uv run python -c "import pyarrow.parquet as pq; t = pq.read_table('data/topstori
 ```text
 aws-etl-news/
 ├── pyproject.toml
+├── infra/
+│   └── main.tf     # S3 bucket (Terraform)
 ├── src/aws_etl_news/
 │   ├── client.py   # fetch_top_story_ids, fetch_item
 │   ├── parse.py    # parse_story (pure function)
-│   └── cli.py      # orchestration and Parquet write
-├── tests/
-│   └── test_parse.py
-└── data/           # gitignored Parquet output
+│   └── cli.py      # orchestration and S3 upload
+└── tests/
+    ├── test_parse.py
+    └── test_cli.py # S3 upload and main(), on moto
 ```
 
 ## Design decisions
@@ -78,6 +93,10 @@ aws-etl-news/
   warning, so one deleted item does not fail the whole batch.
 - **pyarrow over pandas** — avoids pandas' float-coercion of nullable integer columns and
   keeps the write dependency-light.
+- **In-memory upload** — the Parquet file is written to a `BytesIO` buffer and sent with
+  `put_object`, so nothing touches the local disk.
+- **Injected S3 client** — `save_to_parquet` receives the S3 client as a parameter, so
+  tests can pass a moto-backed client instead of a real one.
 
 ## Tests
 
@@ -85,11 +104,11 @@ aws-etl-news/
 uv run pytest
 ```
 
-`parse_story` is covered for:
+The tests never touch AWS or the network: S3 is simulated with [moto](https://github.com/getmoto/moto), AWS credentials are fake, and the Hacker News client is replaced with in-memory data.
 
-- a complete story (all eight fields)
-- a story with no `url`
-- a non-story item (`type == "comment"`), which is discarded
+- `parse_story`: a complete story, a story with no `url`, and a non-story item that is discarded.
+- `save_to_parquet`: the uploaded object reads back as Parquet with the same rows, and a missing `url` is stored as `null`.
+- `main()`: failed fetches and non-stories are skipped and the rest is uploaded; with no IDs or no valid stories it raises and uploads nothing.
 
 ## API used
 
@@ -108,10 +127,9 @@ curl -s 'https://hacker-news.firebaseio.com/v0/maxitem.json'; echo
 
 ## Roadmap
 
-This is phase 1 (local ingestion). Planned next:
+Phase 1 (local ingestion) and phase 2 (S3 storage on AWS) are done. Planned next:
 
-- Write output to S3 (MinIO locally, AWS in production) via a single endpoint switch
-- Provision the bucket and IAM with Terraform
+- Manage IAM with Terraform
 - Partition output by ingestion date (`date=YYYY-MM-DD/`)
 
 ## License
