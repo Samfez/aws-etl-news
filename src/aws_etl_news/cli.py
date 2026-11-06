@@ -15,7 +15,7 @@ from aws_etl_news.client import fetch_item, fetch_top_story_ids
 from aws_etl_news.parse import parse_story
 
 logger = logging.getLogger(__name__)
-BUCKET = "hn-raw"
+BUCKET = "etl-hn-raw-samfez"
 REGION = "eu-central-1"
 
 def main():

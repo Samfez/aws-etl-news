@@ -232,4 +232,4 @@ data/
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
+#.terraform.lock.hcl
