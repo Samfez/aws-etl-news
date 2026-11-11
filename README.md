@@ -1,5 +1,7 @@
 # aws-etl-news
 
+![CI](https://github.com/Samfez/aws-etl-news/actions/workflows/ci.yml/badge.svg)
+
 ETL pipeline that ingests Hacker News front-page stories and writes them as Parquet files to an S3 bucket on AWS.
 
 ## What it does
