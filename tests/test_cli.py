@@ -117,7 +117,7 @@ def test_missing_url_is_stored_as_null(s3):
 # --- main: -----------------------------------------
 
 
-def test_main_uploads_only_valid_stories_under_timestamped_key(s3, monkeypatch):
+def test_main_uploads_only_valid_stories_under_partitioned_key(s3, monkeypatch):
     # id 404 is absent from items -> fetch_item returns None;
     # id 999 is a comment -> parse_story returns None (a skipped non-story).
     use_fake_hn(monkeypatch, [8863, 999, 404], {8863: STORY, 999: COMMENT})
@@ -126,7 +126,7 @@ def test_main_uploads_only_valid_stories_under_timestamped_key(s3, monkeypatch):
 
     keys = object_keys(s3)
     assert len(keys) == 1
-    assert re.fullmatch(r"topstories_\d{8}T\d{6}Z\.parquet", keys[0])
+    assert re.fullmatch(r"date=\d{4}-\d{2}-\d{2}/topstories_\d{8}T\d{6}Z\.parquet", keys[0])
     assert read_rows(s3, keys[0]) == [STORY]
 
 

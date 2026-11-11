@@ -20,8 +20,10 @@ REGION = "eu-central-1"
 
 def main():
 
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    key = f"topstories_{ts}.parquet"
+    now = datetime.now(UTC)
+    ts = now.strftime("%Y%m%dT%H%M%SZ")
+    date = now.strftime("%Y-%m-%d")
+    key = f"date={date}/topstories_{ts}.parquet"
 
     # Step 1: Fetch front-page IDs; if the API fails, abort here
     list_top_story_ids = fetch_top_story_ids(50)
