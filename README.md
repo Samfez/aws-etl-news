@@ -8,7 +8,7 @@ ETL pipeline that ingests Hacker News front-page stories and writes them as Parq
 
 1. **Extract** — fetch the current top-story IDs, then each item, from the [Hacker News Firebase API](https://github.com/HackerNews/API).
 2. **Transform** — keep only `type == "story"` records and flatten them to eight fields. Missing optional fields (for example `url` on Ask HN posts) stay `null`.
-3. **Load** — write the stories as Parquet to an in-memory buffer and upload it to S3 under a timestamped key.
+3. **Load** — write the stories as Parquet to an in-memory buffer and upload it to S3 under a key partitioned by ingestion date (`date=YYYY-MM-DD/`).
 
 Each run fetches up to 50 front-page items. A failed ID list or an empty parse result aborts the job; a single item that fails to fetch or parse is skipped with a warning.
 
@@ -45,13 +45,16 @@ AWS_PROFILE=<your-profile> uv run python -m aws_etl_news.cli
 Output lands at:
 
 ```text
-s3://<your-bucket>/topstories_<UTC timestamp>.parquet
+s3://<your-bucket>/date=<YYYY-MM-DD>/topstories_<UTC timestamp>.parquet
 ```
 
-List the uploaded files:
+For example, `date=2026-11-11/topstories_20261111T093000Z.parquet`. Both the date and the timestamp are UTC and come from the same instant, so a run near midnight always lands in the partition matching its timestamp.
+
+List the uploaded files, across all partitions or for a single day:
 
 ```bash
-aws s3 ls s3://<your-bucket>/ --profile <your-profile>
+aws s3 ls s3://<your-bucket>/ --recursive --profile <your-profile>
+aws s3 ls s3://<your-bucket>/date=<YYYY-MM-DD>/ --profile <your-profile>
 ```
 
 ## Story schema
@@ -99,6 +102,10 @@ aws-etl-news/
   `put_object`, so nothing touches the local disk.
 - **Injected S3 client** — `save_to_parquet` receives the S3 client as a parameter, so
   tests can pass a moto-backed client instead of a real one.
+- **Hive-style date partitioning** — keys are prefixed with `date=YYYY-MM-DD/`, so
+  query engines such as Athena or Spark can discover the partition column and prune
+  by date instead of scanning the whole bucket. The partition is the ingestion date
+  (UTC), not the stories' publication `time`.
 
 ## Tests
 
@@ -110,7 +117,7 @@ The tests never touch AWS or the network: S3 is simulated with [moto](https://gi
 
 - `parse_story`: a complete story, a story with no `url`, and a non-story item that is discarded.
 - `save_to_parquet`: the uploaded object reads back as Parquet with the same rows, and a missing `url` is stored as `null`.
-- `main()`: failed fetches and non-stories are skipped and the rest is uploaded; with no IDs or no valid stories it raises and uploads nothing.
+- `main()`: failed fetches and non-stories are skipped and the rest is uploaded under a `date=YYYY-MM-DD/topstories_<timestamp>.parquet` key; with no IDs or no valid stories it raises and uploads nothing.
 
 ## API used
 
@@ -129,10 +136,15 @@ curl -s 'https://hacker-news.firebaseio.com/v0/maxitem.json'; echo
 
 ## Roadmap
 
-Phase 1 (local ingestion) and phase 2 (S3 storage on AWS) are done. Planned next:
+Done:
+
+- Phase 1: local ingestion to Parquet
+- Phase 2: S3 storage on AWS, provisioned with Terraform
+- Output partitioned by ingestion date (`date=YYYY-MM-DD/`)
+
+Planned next:
 
 - Manage IAM with Terraform
-- Partition output by ingestion date (`date=YYYY-MM-DD/`)
 
 ## License
 
