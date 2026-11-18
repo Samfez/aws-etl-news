@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/Samfez/aws-etl-news/actions/workflows/ci.yml/badge.svg)
 
-ETL pipeline that ingests Hacker News front-page stories and writes them as Parquet files to an S3 bucket on AWS.
+ETL pipeline that ingests Hacker News front-page stories and writes them as Parquet files to an S3 bucket on AWS. Runs on a schedule as a containerised AWS Lambda, provisioned end to end with Terraform.
 
 ## What it does
 
@@ -12,12 +12,15 @@ ETL pipeline that ingests Hacker News front-page stories and writes them as Parq
 
 Each run fetches up to 50 front-page items. A failed ID list or an empty parse result aborts the job; a single item that fails to fetch or parse is skipped with a warning.
 
+In production the pipeline runs unattended: an EventBridge schedule triggers a containerised Lambda, which runs the same code and uploads to S3.
+
 ## Requirements
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- [Terraform](https://developer.hashicorp.com/terraform) and the [AWS CLI](https://aws.amazon.com/cli/), to provision the bucket and run against AWS
-- An AWS CLI profile with permission to write to the bucket
+- [Terraform](https://developer.hashicorp.com/terraform) and the [AWS CLI](https://aws.amazon.com/cli/), to provision the infrastructure and run against AWS
+- [Docker](https://www.docker.com/), to build the Lambda image
+- An AWS CLI profile with permission to deploy the stack and write to the bucket
 
 ## Setup
 
@@ -25,9 +28,9 @@ Each run fetches up to 50 front-page items. A failed ID list or an empty parse r
 uv sync --group dev
 ```
 
-## Provision the bucket
+## Provision the infrastructure
 
-The bucket is defined in `infra/main.tf`. Before applying, set your bucket name and AWS CLI profile there, and use the same bucket name for `BUCKET` in `src/aws_etl_news/cli.py`. S3 bucket names are globally unique, so pick your own.
+The S3 bucket, ECR repository, Lambda, its IAM role and the EventBridge schedule are all defined in `infra/main.tf`. Before applying, set your bucket name and AWS CLI profile there, and use the same bucket name for `BUCKET` in `src/aws_etl_news/cli.py`. S3 bucket names are globally unique, so pick your own.
 
 ```bash
 aws sso login --profile <your-profile>
@@ -36,10 +39,33 @@ terraform init
 terraform apply
 ```
 
+## Deploy and schedule
+
+The pipeline runs as a container-image Lambda, triggered by an EventBridge schedule. The Lambda's IAM role is least-privilege: `s3:PutObject` to the bucket only.
+
+```bash
+# build for Lambda's architecture, push to ECR, then point the function at it
+docker build --platform linux/amd64 --provenance=false -t aws-etl-news .
+docker tag aws-etl-news:latest <account>.dkr.ecr.<region>.amazonaws.com/aws-etl-news:latest
+docker push <account>.dkr.ecr.<region>.amazonaws.com/aws-etl-news:latest
+aws lambda update-function-code --function-name aws-etl-news \
+  --image-uri <account>.dkr.ecr.<region>.amazonaws.com/aws-etl-news:latest
+```
+
+> Note: pushing a new image to ECR does not update the Lambda. The `update-function-code` step is required for the function to pick it up.
+
 ## Run the pipeline
+
+Locally, against AWS:
 
 ```bash
 AWS_PROFILE=<your-profile> uv run python -m aws_etl_news.cli
+```
+
+Or invoke the deployed Lambda directly, without waiting for the schedule:
+
+```bash
+aws lambda invoke --function-name aws-etl-news --profile <your-profile> response.json
 ```
 
 Output lands at:
@@ -74,16 +100,18 @@ aws s3 ls s3://<your-bucket>/date=<YYYY-MM-DD>/ --profile <your-profile>
 
 ```text
 aws-etl-news/
+├── Dockerfile             # Lambda container image
 ├── pyproject.toml
 ├── infra/
-│   └── main.tf     # S3 bucket (Terraform)
+│   └── main.tf            # S3, ECR, Lambda, IAM role, EventBridge (Terraform)
 ├── src/aws_etl_news/
-│   ├── client.py   # fetch_top_story_ids, fetch_item
-│   ├── parse.py    # parse_story (pure function)
-│   └── cli.py      # orchestration and S3 upload
+│   ├── client.py          # fetch_top_story_ids, fetch_item
+│   ├── parse.py           # parse_story (pure function)
+│   ├── cli.py             # orchestration and S3 upload
+│   └── lambda_handler.py  # Lambda entry point (calls main)
 └── tests/
     ├── test_parse.py
-    └── test_cli.py # S3 upload and main(), on moto
+    └── test_cli.py        # S3 upload and main(), on moto
 ```
 
 ## Design decisions
@@ -102,6 +130,13 @@ aws-etl-news/
   `put_object`, so nothing touches the local disk.
 - **Injected S3 client** — `save_to_parquet` receives the S3 client as a parameter, so
   tests can pass a moto-backed client instead of a real one.
+- **Same logic, three entry points** — `main()` holds the pipeline; it runs as a CLI
+  script, under moto in tests, and via the Lambda handler in production, with no code
+  changes between them. boto3 picks up the Lambda's IAM role automatically, just as it
+  picks up the local profile.
+- **Containerised Lambda** — packaged as a container image rather than a zip layer,
+  because pyarrow exceeds Lambda's 250 MB unzipped limit. The image is built for
+  `linux/amd64` and stored in ECR.
 - **Hive-style date partitioning** — keys are prefixed with `date=YYYY-MM-DD/`, so
   query engines such as Athena or Spark can discover the partition column and prune
   by date instead of scanning the whole bucket. The partition is the ingestion date
@@ -140,12 +175,16 @@ Done:
 
 - Phase 1: local ingestion to Parquet
 - Phase 2: S3 storage on AWS, provisioned with Terraform
-- Output partitioned by ingestion date (`date=YYYY-MM-DD/`)
+- Date-partitioned output (`date=YYYY-MM-DD/`)
+- CI: ruff and pytest on every push and PR (GitHub Actions)
+- Phase 4: scheduled runs as a containerised Lambda (ECR + EventBridge)
 
 Planned next:
 
-- Manage IAM with Terraform
+- Transform layer with dbt / SQL over the Parquet in S3
+- Production hardening: remote Terraform state (S3), a deploy role, Terraform in CI
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+</document_content>

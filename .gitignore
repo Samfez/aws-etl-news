@@ -233,3 +233,6 @@ data/
 *.tfstate.*
 .terraform/
 #.terraform.lock.hcl
+
+# command outputs
+response.json
