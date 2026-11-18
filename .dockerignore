@@ -1,0 +1,9 @@
+.venv/
+data/
+.git/
+tests/
+.github/
+infra/
+*.parquet
+.env
+.env.*
