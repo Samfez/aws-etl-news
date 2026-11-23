@@ -1,0 +1,11 @@
+transform:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "dev.duckdb"
+      extensions:
+        - httpfs
+      secrets:
+        - type: s3
+          provider: credential_chain
