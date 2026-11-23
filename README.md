@@ -33,20 +33,22 @@ Ingestion (Python on Lambda) lands partitioned Parquet in S3; a dbt layer models
 
 dbt models the raw Parquet into layered, tested tables. DuckDB runs the SQL locally and reads the partitioned Parquet from S3 directly — no server, no data load.
 
-| Model | Layer | What it does |
-| --- | --- | --- |
-| `stg_stories` | staging | clean and type the raw snapshots |
+| Model                 | Layer        | What it does                                                     |
+| --------------------- | ------------ | ---------------------------------------------------------------- |
+| `stg_stories`         | staging      | clean and type the raw snapshots                                 |
 | `int_stories_deduped` | intermediate | one row per story — its latest snapshot (`QUALIFY ROW_NUMBER()`) |
-| `daily_story_stats` | mart | per-day aggregates (count, avg/median score, comments) |
-| `story_score_growth` | mart | score delta between consecutive snapshots (`LAG`) |
+| `daily_story_stats`   | mart         | per-day aggregates (count, avg/median score, comments)           |
+| `story_score_growth`  | mart         | score delta between consecutive snapshots (`LAG`)                |
 
 Five dbt data tests back the models, including a `unique` check on the dedup's `id` — which verifies the deduplication itself, not just the SQL.
 
 ## Testing
 
-- **pytest** tests the *code* (`parse_story`, the S3 upload, `main()`), with S3 simulated by [moto](https://github.com/getmoto/moto) and the API replaced by in-memory data — no AWS, no network.
-- **dbt data tests** test the *data* (`not_null`, `unique`).
-- Both run in CI (ruff + pytest) on every push and pull request.
+- **pytest** tests the _code_ (`parse_story`, the S3 upload, `main()`), with S3
+  simulated by moto and the API replaced by in-memory data — no AWS, no network.
+  This runs in CI (with ruff) on every push and pull request.
+- **dbt data tests** test the _data_ (`not_null`, `unique`), run locally against
+  the models. Wiring them into CI is on the roadmap.
 
 ## Running it
 
