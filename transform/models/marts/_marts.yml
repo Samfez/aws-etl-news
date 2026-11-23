@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: daily_story_stats
+    columns:
+      - name: ingestion_date
+        data_tests:
+          - not_null
+          - unique

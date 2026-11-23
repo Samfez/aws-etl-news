@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: hn
+    tables:
+      - name: stories
+        config:
+          external_location: >
+            read_parquet(
+              's3://etl-hn-raw-samfez/date=*/*.parquet',
+              hive_partitioning = true,
+              union_by_name = true
+            )
+models:
+  - name: stg_stories
+    columns:
+      - name: id
+        data_tests:
+          - not_null

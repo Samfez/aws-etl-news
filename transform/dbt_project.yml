@@ -1,0 +1,14 @@
+name: "aws_etl_news_transform"
+version: "1.0.0"
+profile: "transform"
+
+model-paths: ["models"]
+
+models:
+  aws_etl_news_transform:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table

@@ -1,0 +1,9 @@
+version: 2
+
+models:
+  - name: int_stories_deduped
+    columns:
+      - name: id
+        data_tests:
+          - not_null
+          - unique
